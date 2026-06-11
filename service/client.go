@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -229,6 +230,12 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		for _, id := range ids {
 			var client model.Client
 			err = tx.Where("id = ?", id).First(&client).Error
+			// An id already gone (concurrent delete / stale client list) is a
+			// no-op, not a failure: deleting an absent client still leaves the
+			// caller with the intended end state (client absent).
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -251,6 +258,13 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		}
 		var client model.Client
 		err = tx.Where("id = ?", id).First(&client).Error
+		// Deleting a client that is already gone (a stale UI row, a concurrent
+		// delete from another session, or a resubmitted request) is an
+		// idempotent no-op instead of a "record not found" failure — the
+		// intended end state (client absent) already holds.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}
