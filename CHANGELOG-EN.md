@@ -5,7 +5,13 @@ All notable changes to this project are documented in this file.
 This is the English-language changelog. See `CHANGELOG-RU.md` for Russian and
 `CHANGELOG-ZH.md` for Simplified Chinese.
 
-## [Unreleased] - Client and TLS edits apply without restarting the core
+## [1.5.7] - 2026-06-11 - first stable 1.5.7: Paid Subscriptions, Nexus redesign, hardening, no-restart apply
+
+First stable release of the 1.5.7 line, consolidating 1.5.7-beta1..beta10 — the
+experimental **Paid Subscriptions** Telegram bot (six payment providers, trials,
+refunds, broadcasts), the refreshed dark "technical" Nexus interface, and three
+rounds of independent security hardening. The entries below are new since
+beta10.
 
 - Adding, editing, enabling/disabling, and deleting clients no longer restarts
   the sing-box core: only the affected inbounds are hot-reloaded in the running
@@ -22,6 +28,8 @@ This is the English-language changelog. See `CHANGELOG-RU.md` for Russian and
   touches the core at all.
 - Fixed: editing a TLS entry referenced by at least one service failed with a
   database scan error and rolled back the whole edit.
+
+Full release notes: [`docs/releases/v1.5.7.md`](docs/releases/v1.5.7.md).
 
 ## [1.5.7-beta10] - 2026-06-10 - Remediation from a full quality, security, and supply-chain review
 

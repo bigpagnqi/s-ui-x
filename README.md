@@ -26,7 +26,7 @@
 
 Advanced Web panel built on `SagerNet/Sing-Box`.
 
-**Note:** this repository is based on `alireza0/s-ui` starting from `v1.4.1`, with security and reliability hardening applied on top (current build: `v1.5.7-beta10`).
+**Note:** this repository is based on `alireza0/s-ui` starting from `v1.4.1`, with security and reliability hardening applied on top (current build: `v1.5.7`).
 
 **This fork keeps the original project structure and updates the user-facing documentation and installation links for this repository. You can use the scripts from this repository directly, or fork and build the project yourself.**
 
@@ -39,7 +39,7 @@ The full per-release notes live in the language-specific changelog files:
 - English: [`CHANGELOG-EN.md`](CHANGELOG-EN.md)
 - Русский: [`CHANGELOG-RU.md`](CHANGELOG-RU.md)
 - 简体中文: [`CHANGELOG-ZH.md`](CHANGELOG-ZH.md)
-- Current beta release notes: [`docs/releases/v1.5.7-beta10.md`](docs/releases/v1.5.7-beta10.md)
+- Current release notes: [`docs/releases/v1.5.7.md`](docs/releases/v1.5.7.md)
 
 The README keeps installation and project overview short. For full release
 history, breaking notes, upgrade guidance, and rollback notes, open the
@@ -121,18 +121,19 @@ bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.s
 3. Run `install-windows.bat` as Administrator.
 4. Follow the installation wizard.
 
-## Install v1.5.7-beta10
+## Install v1.5.7 Stable
 
-This beta applies the fixes from a full code-quality, optimization, security, and
-supply-chain review: financial-correctness fixes in Paid Subscriptions, security
-hardening, new abuse-detection audit signals, frontend correctness fixes, and CI
-supply-chain hardening. No manual migration — one additive database column is
-created automatically. Two behavior changes: changing the admin password signs
-out all other sessions, and the per-username login lockout is now a delay rather
-than a hard block — see the release notes. This is a beta — test first.
+First stable release of the 1.5.7 line, consolidating beta1..beta10: the
+experimental Paid Subscriptions Telegram bot (six payment providers, trials,
+refunds, broadcasts; off by default), the refreshed dark "technical" Nexus
+interface, three rounds of independent security hardening, and — new in this
+stable release — client and TLS edits applied via hot reload without restarting
+the sing-box core. No manual migration. Review the breaking changes in the
+release notes if you use scoped API tokens or relied on 3x-ui scheduled sync /
+remote import.
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.sh) v1.5.7-beta10
+bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.sh) v1.5.7
 ```
 
 Or from a local clone:
@@ -140,7 +141,7 @@ Or from a local clone:
 ```sh
 git clone https://github.com/deposist/s-ui-x.git
 cd s-ui-x
-sudo bash install.sh v1.5.7-beta10
+sudo bash install.sh v1.5.7
 ```
 
 ## Install v1.5.6 Stable
@@ -411,7 +412,7 @@ certbot certonly --standalone --register-unsafely-without-email --non-interactiv
 
 Продвинутая Web-панель, построенная на базе `SagerNet/Sing-Box`.
 
-**Примечание:** этот репозиторий основан на `alireza0/s-ui`, начиная с `v1.4.1`, с применённым набором исправлений по безопасности и надёжности (текущая сборка: `v1.5.7-beta10`).
+**Примечание:** этот репозиторий основан на `alireza0/s-ui`, начиная с `v1.4.1`, с применённым набором исправлений по безопасности и надёжности (текущая сборка: `v1.5.7`).
 
 **Этот fork сохраняет структуру оригинального проекта и обновляет пользовательскую документацию и ссылки установки для этого репозитория. Вы можете напрямую использовать скрипты из этого репозитория или сделать fork и собрать проект самостоятельно.**
 
@@ -424,7 +425,7 @@ certbot certonly --standalone --register-unsafely-without-email --non-interactiv
 - English: [`CHANGELOG-EN.md`](CHANGELOG-EN.md)
 - Русский: [`CHANGELOG-RU.md`](CHANGELOG-RU.md)
 - 简体中文: [`CHANGELOG-ZH.md`](CHANGELOG-ZH.md)
-- Release notes текущей beta: [`docs/releases/v1.5.7-beta10.md`](docs/releases/v1.5.7-beta10.md)
+- Release notes текущей версии: [`docs/releases/v1.5.7.md`](docs/releases/v1.5.7.md)
 
 README оставляет только установку и общий обзор проекта. Полная история
 релизов, breaking-заметки, гайд по обновлению и инструкции по откату находятся
@@ -506,19 +507,19 @@ bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.s
 3. Запустите `install-windows.bat` от имени администратора.
 4. Следуйте инструкциям мастера установки.
 
-## Установка v1.5.7-beta10
+## Установка стабильной версии v1.5.7
 
-Эта бета применяет исправления из полного ревью качества кода, оптимизации,
-безопасности и цепочки поставок: финансовая корректность «Платных подписок»,
-hardening безопасности, новые сигналы аудита для детектирования злоупотреблений,
-исправления корректности фронтенда и усиление цепочки поставок CI. Ручная миграция
-не нужна — одна добавочная колонка БД создаётся автоматически. Два изменения
-поведения: смена пароля администратора разлогинивает все прочие сессии, а
-per-username блокировка логина теперь задержка, а не жёсткий блок — см. release
-notes. Это бета — сначала протестируйте.
+Первый стабильный релиз линейки 1.5.7, объединяющий beta1..beta10:
+экспериментальный Telegram-бот «Платные подписки» (шесть платёжных провайдеров,
+триалы, возвраты, рассылки; выключен по умолчанию), обновлённый тёмный
+«технический» интерфейс Nexus, три раунда независимого аудита безопасности и —
+новое в этом стабильном релизе — применение изменений клиентов и TLS горячей
+перезагрузкой без перезапуска ядра sing-box. Ручная миграция не нужна.
+Просмотрите ломающие изменения в release notes, если используете скоупированные
+API-токены или полагались на плановую синхронизацию / удалённый импорт 3x-ui.
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.sh) v1.5.7-beta10
+bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.sh) v1.5.7
 ```
 
 Или из локального клона:
@@ -526,7 +527,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/deposist/s-ui-x/main/install.s
 ```sh
 git clone https://github.com/deposist/s-ui-x.git
 cd s-ui-x
-sudo bash install.sh v1.5.7-beta10
+sudo bash install.sh v1.5.7
 ```
 
 ## Установка стабильной версии v1.5.6
