@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 This is the English-language changelog. See `CHANGELOG-RU.md` for Russian and
 `CHANGELOG-ZH.md` for Simplified Chinese.
 
+## [1.5.7-hotfix1] - 2026-06-11 - Fix "record not found" after deleting a client; SUI_COOKIE_KEY generator
+
+Hotfix for v1.5.7 plus a session cookie key generator in the `s-ui` menu and
+the installer. No breaking, manual-migration, or configuration changes.
+
+### Fixes
+
+- Deleting a client whose database row was already gone (a stale list row, a
+  concurrent delete from another session or tab, a resubmitted request) no
+  longer fails with "record not found": client delete and bulk delete are now
+  idempotent — deleting an absent client is a no-op success, and a bulk delete
+  skips already-gone ids while deleting the rest. The delete paths of inbounds,
+  outbounds, endpoints, services, and TLS were verified already idempotent and
+  are now covered by regression tests.
+
+### Management script and installer
+
+- New `s-ui` menu item 23 generates the session cookie key (`SUI_COOKIE_KEY`)
+  into `/etc/s-ui/secretbox.env`; an existing key is detected and offered a
+  rotation with rollover (previous keys stay accepted, so nobody is signed
+  out).
+- The installer generates `SUI_COOKIE_KEY` automatically when absent — it
+  never overwrites an existing key and never prompts. On the first upgrade
+  that introduces the key, sessions signed with the previous fallback key are
+  signed out once.
+
+Full release notes: [`docs/releases/v1.5.7-hotfix1.md`](docs/releases/v1.5.7-hotfix1.md).
+
 ## [1.5.7] - 2026-06-11 - first stable 1.5.7: Paid Subscriptions, Nexus redesign, hardening, no-restart apply
 
 First stable release of the 1.5.7 line, consolidating 1.5.7-beta1..beta10 — the
