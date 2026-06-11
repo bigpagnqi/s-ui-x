@@ -9,6 +9,7 @@ import (
 	"github.com/deposist/s-ui-x/core"
 	"github.com/deposist/s-ui-x/database"
 	"github.com/deposist/s-ui-x/database/model"
+	"github.com/deposist/s-ui-x/ipmonitor"
 	"github.com/deposist/s-ui-x/logger"
 	"github.com/deposist/s-ui-x/realtime"
 	"github.com/deposist/s-ui-x/util/common"
@@ -37,6 +38,16 @@ type SingBoxConfig struct {
 	Route        json.RawMessage   `json:"route"`
 	Experimental json.RawMessage   `json:"experimental"`
 }
+
+var restartInboundsAfterSave = func(s *ConfigService, inboundIds []uint) error {
+	return s.InboundService.RestartInbounds(database.GetDB(), inboundIds)
+}
+
+var restartServicesAfterSave = func(s *ConfigService, serviceIds []uint) error {
+	return s.ServicesService.RestartServices(database.GetDB(), serviceIds)
+}
+
+var invalidateClientPolicyCacheAfterSave = ipmonitor.InvalidateAllCache
 
 func NewConfigService(core *core.Core) *ConfigService {
 	runtime := NewRuntime(core)
@@ -222,6 +233,9 @@ func (s *ConfigService) CheckOutboundWithContext(ctx context.Context, tag string
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) (objs []string, err error) {
 	objs = []string{obj}
 	needsCoreRestart := false
+	var inboundReloadIds []uint
+	var serviceReloadIds []uint
+	invalidateClientPolicyCache := false
 	auditTelegramBackupPassphrase, auditTelegramBackupPassphraseConfigured, err := s.telegramBackupPassphraseAuditState(obj, data)
 	if err != nil {
 		return nil, err
@@ -238,26 +252,11 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			if auditTelegramBackupPassphrase {
 				s.SettingService.recordTelegramBackupPassphraseChanged(loginUser, auditTelegramBackupPassphraseConfigured)
 			}
+			if invalidateClientPolicyCache {
+				invalidateClientPolicyCacheAfterSave()
+			}
 			realtime.Publish(realtime.TopicConfigInvalidated, nil)
-			coreInstance := s.coreInstance()
-			if coreInstance == nil {
-				return
-			}
-			if needsCoreRestart {
-				if coreInstance.IsRunning() {
-					if restartErr := s.RestartCore(); restartErr != nil {
-						logger.Warning("sing-box restart after save failed: ", restartErr)
-					}
-				} else {
-					if startErr := s.startCore(true); startErr != nil {
-						logger.Warning("sing-box start after save failed: ", startErr)
-					}
-				}
-			} else if !coreInstance.IsRunning() {
-				if startErr := s.startCore(true); startErr != nil {
-					logger.Warning("sing-box start after save failed: ", startErr)
-				}
-			}
+			s.applyPostCommitCoreChanges(needsCoreRestart, inboundReloadIds, serviceReloadIds)
 		} else {
 			tx.Rollback()
 		}
@@ -267,14 +266,19 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	case "clients":
 		var inboundIds []uint
 		inboundIds, err = s.ClientService.Save(tx, act, data, hostname)
+		invalidateClientPolicyCache = true
 		if err == nil && len(inboundIds) > 0 {
 			objs = append(objs, "inbounds")
-			needsCoreRestart = true
+			inboundReloadIds = inboundIds
 		}
 	case "tls":
-		err = s.TlsService.Save(tx, act, data, hostname)
+		var tlsInboundIds, tlsServiceIds []uint
+		tlsInboundIds, tlsServiceIds, err = s.TlsService.Save(tx, act, data, hostname)
 		objs = append(objs, "clients", "inbounds")
-		needsCoreRestart = true
+		if err == nil {
+			inboundReloadIds = tlsInboundIds
+			serviceReloadIds = tlsServiceIds
+		}
 	case "inbounds":
 		err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 		objs = append(objs, "clients")
@@ -318,6 +322,51 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	s.setLastUpdate(time.Now().Unix())
 
 	return objs, nil
+}
+
+// applyPostCommitCoreChanges brings the running core in sync with the
+// just-committed configuration: a full restart for config-level changes, or a
+// hot reload of only the affected inbounds/services for client and TLS edits.
+// A failed hot reload falls back to a full restart so the core never keeps
+// serving a partially updated state.
+func (s *ConfigService) applyPostCommitCoreChanges(needsCoreRestart bool, inboundIds []uint, serviceIds []uint) {
+	coreInstance := s.coreInstance()
+	if coreInstance == nil {
+		return
+	}
+	if needsCoreRestart {
+		if coreInstance.IsRunning() {
+			if restartErr := s.RestartCore(); restartErr != nil {
+				logger.Warning("sing-box restart after save failed: ", restartErr)
+			}
+		} else if startErr := s.startCore(true); startErr != nil {
+			logger.Warning("sing-box start after save failed: ", startErr)
+		}
+		return
+	}
+	if !coreInstance.IsRunning() {
+		if startErr := s.startCore(true); startErr != nil {
+			logger.Warning("sing-box start after save failed: ", startErr)
+		}
+		return
+	}
+	if len(inboundIds) == 0 && len(serviceIds) == 0 {
+		return
+	}
+	var reloadErr error
+	if len(inboundIds) > 0 {
+		reloadErr = restartInboundsAfterSave(s, inboundIds)
+	}
+	if reloadErr == nil && len(serviceIds) > 0 {
+		reloadErr = restartServicesAfterSave(s, serviceIds)
+	}
+	if reloadErr == nil {
+		return
+	}
+	logger.Warning("sing-box partial reload after save failed: ", reloadErr)
+	if restartErr := s.RestartCore(); restartErr != nil {
+		logger.Error("sing-box restart after failed partial reload also failed; core may be out of sync: ", restartErr)
+	}
 }
 
 func (s *ConfigService) coreInstance() *core.Core {
