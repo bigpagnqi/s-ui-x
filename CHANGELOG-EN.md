@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 This is the English-language changelog. See `CHANGELOG-RU.md` for Russian and
 `CHANGELOG-ZH.md` for Simplified Chinese.
 
+## [Unreleased] - Client and TLS edits apply without restarting the core
+
+- Adding, editing, enabling/disabling, and deleting clients no longer restarts
+  the sing-box core: only the affected inbounds are hot-reloaded in the running
+  core. Existing connections on those inbounds are closed, so revoked or
+  disabled credentials stop working immediately; connections on unrelated
+  inbounds survive the change. If a hot reload fails, the panel falls back to a
+  full core restart so the core never keeps serving a stale configuration.
+- IP-limit changes (`limitIp`, IP-limit mode) take effect immediately: saving a
+  client invalidates the IP-limit enforcement cache instead of waiting out its
+  30-second TTL.
+- Editing a TLS certificate now hot-reloads only the inbounds and services that
+  reference it (previously: a full core restart), and the reload runs after the
+  database transaction commits. Creating or deleting a TLS entry no longer
+  touches the core at all.
+- Fixed: editing a TLS entry referenced by at least one service failed with a
+  database scan error and rolled back the whole edit.
+
 ## [1.5.7-beta10] - 2026-06-10 - Remediation from a full quality, security, and supply-chain review
 
 Applies the fixes from a full code-quality, optimization, security, and
