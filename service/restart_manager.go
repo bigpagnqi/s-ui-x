@@ -15,6 +15,7 @@ const restartSignalDelay = 3 * time.Second
 
 type restartManager struct {
 	mu           sync.Mutex
+	cond         *sync.Cond
 	inFlight     bool
 	pendingTimer *time.Timer
 	signalDelay  time.Duration
@@ -36,10 +37,12 @@ func init() {
 }
 
 func newRestartManager(signalDelay time.Duration, signal func() error) *restartManager {
-	return &restartManager{
+	m := &restartManager{
 		signalDelay: signalDelay,
 		signal:      signal,
 	}
+	m.cond = sync.NewCond(&m.mu)
+	return m
 }
 
 func StopRestartManager() {
@@ -57,6 +60,16 @@ func (m *restartManager) run(operation func() error) error {
 	return operation()
 }
 
+// runBlocking waits for any in-flight operation (including a pending restart
+// signal) to finish and then runs the operation exclusively. Unlike run, it
+// never skips: callers use it when the operation must not be silently dropped,
+// e.g. when syncing the core with just-committed configuration.
+func (m *restartManager) runBlocking(operation func() error) error {
+	m.beginBlocking()
+	defer m.end()
+	return operation()
+}
+
 func (m *restartManager) sendSighup() error {
 	return m.ScheduleRestart(m.signalDelay)
 }
@@ -69,15 +82,20 @@ func (m *restartManager) ScheduleRestart(delay time.Duration) error {
 		return nil
 	}
 
+	// The timer callback may fire concurrently with this function, so the
+	// captured timer variable is published under the same mutex it is read
+	// with inside the callback.
+	m.mu.Lock()
 	var timer *time.Timer
 	timer = time.AfterFunc(delay, func() {
-		defer m.endPending(timer)
+		m.mu.Lock()
+		self := timer
+		m.mu.Unlock()
+		defer m.endPending(self)
 		if err := m.signal(); err != nil {
 			logger.Error("send signal SIGHUP failed:", err)
 		}
 	})
-
-	m.mu.Lock()
 	m.pendingTimer = timer
 	m.mu.Unlock()
 	return nil
@@ -93,6 +111,7 @@ func (m *restartManager) cancelPending() {
 	m.pendingTimer = nil
 	if timer.Stop() {
 		m.inFlight = false
+		m.cond.Broadcast()
 	}
 	m.mu.Unlock()
 }
@@ -107,9 +126,19 @@ func (m *restartManager) begin() bool {
 	return true
 }
 
+func (m *restartManager) beginBlocking() {
+	m.mu.Lock()
+	for m.inFlight {
+		m.cond.Wait()
+	}
+	m.inFlight = true
+	m.mu.Unlock()
+}
+
 func (m *restartManager) end() {
 	m.mu.Lock()
 	m.inFlight = false
+	m.cond.Broadcast()
 	m.mu.Unlock()
 }
 
@@ -119,6 +148,7 @@ func (m *restartManager) endPending(timer *time.Timer) {
 		m.pendingTimer = nil
 	}
 	m.inFlight = false
+	m.cond.Broadcast()
 	m.mu.Unlock()
 }
 

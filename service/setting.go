@@ -673,6 +673,26 @@ func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
 	return nil
 }
 
+// ConfigBlobChanged reports whether saving the given config would change the
+// stored blob. It compares against the exact persisted representation
+// (SaveConfig's MarshalIndent form), so a byte-identical re-save is detected
+// reliably and any doubt counts as changed.
+func (s *SettingService) ConfigBlobChanged(tx *gorm.DB, config json.RawMessage) (bool, error) {
+	configs, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	var stored model.Setting
+	result := tx.Model(model.Setting{}).Where("key = ?", "config").Limit(1).Find(&stored)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return true, nil
+	}
+	return stored.Value != string(configs), nil
+}
+
 func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 	var err error
 	var settings map[string]string

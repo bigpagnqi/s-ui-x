@@ -156,71 +156,96 @@ func (s *InboundService) FromIds(ids []uint) ([]*model.Inbound, error) {
 	return inbounds, nil
 }
 
-func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, initUserIds string, hostname string) error {
-	var err error
-
+func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, initUserIds string, hostname string) (*entityCoreChange, error) {
 	switch act {
 	case "new", "edit":
-		var inbound model.Inbound
-		err = inbound.UnmarshalJSON(data)
-		if err != nil {
-			return err
-		}
-		if inbound.TlsId > 0 {
-			err = tx.Model(model.Tls{}).Where("id = ?", inbound.TlsId).Find(&inbound.Tls).Error
-			if err != nil {
-				return err
-			}
-		}
-		var oldTag string
-		if act == "edit" {
-			err = tx.Model(model.Inbound{}).Select("tag").Where("id = ?", inbound.Id).Find(&oldTag).Error
-			if err != nil {
-				return err
-			}
-		}
-
-		err = util.FillOutJson(&inbound, hostname)
-		if err != nil {
-			return err
-		}
-
-		err = tx.Save(&inbound).Error
-		if err != nil {
-			return err
-		}
-		switch act {
-		case "new":
-			err = s.ClientService.UpdateClientsOnInboundAdd(tx, initUserIds, inbound.Id, hostname)
-		case "edit":
-			err = s.ClientService.UpdateLinksByInboundChange(tx, &[]model.Inbound{inbound}, hostname, oldTag)
-		}
-		if err != nil {
-			return err
-		}
+		return s.saveInboundUpsert(tx, act, data, initUserIds, hostname)
 	case "del":
-		var tag string
-		err = json.Unmarshal(data, &tag)
-		if err != nil {
-			return err
-		}
-		var id uint
-		err = tx.Model(model.Inbound{}).Select("id").Where("tag = ?", tag).Scan(&id).Error
-		if err != nil {
-			return err
-		}
-		err = s.ClientService.UpdateClientsOnInboundDelete(tx, id, tag)
-		if err != nil {
-			return err
-		}
-		err = tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
-		if err != nil {
-			return err
-		}
+		return s.saveInboundDelete(tx, data)
 	default:
-		return common.NewErrorf("unknown action: %s", act)
+		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil
+}
+
+func (s *InboundService) saveInboundUpsert(tx *gorm.DB, act string, data json.RawMessage, initUserIds string, hostname string) (*entityCoreChange, error) {
+	var inbound model.Inbound
+	if err := inbound.UnmarshalJSON(data); err != nil {
+		return nil, err
+	}
+	if inbound.TlsId > 0 {
+		if err := tx.Model(model.Tls{}).Where("id = ?", inbound.TlsId).Find(&inbound.Tls).Error; err != nil {
+			return nil, err
+		}
+	}
+	var oldTag string
+	if act == "edit" {
+		if err := tx.Model(model.Inbound{}).Select("tag").Where("id = ?", inbound.Id).Find(&oldTag).Error; err != nil {
+			return nil, err
+		}
+		if oldTag != "" && oldTag != inbound.Tag {
+			refs, err := inboundTagReferences(tx, oldTag)
+			if err != nil {
+				return nil, err
+			}
+			if len(refs) > 0 {
+				return nil, formatTagReferenceError("inbound", oldTag, refs)
+			}
+		}
+	}
+
+	if err := util.FillOutJson(&inbound, hostname); err != nil {
+		return nil, err
+	}
+	if err := tx.Save(&inbound).Error; err != nil {
+		return nil, err
+	}
+	var err error
+	switch act {
+	case "new":
+		err = s.ClientService.UpdateClientsOnInboundAdd(tx, initUserIds, inbound.Id, hostname)
+	case "edit":
+		err = s.ClientService.UpdateLinksByInboundChange(tx, &[]model.Inbound{inbound}, hostname, oldTag)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	change := &entityCoreChange{reloadIds: []uint{inbound.Id}}
+	if oldTag != "" && oldTag != inbound.Tag {
+		change.removeTags = []string{oldTag}
+	}
+	// ssm-api services capture the managed inbound adapter at construction, so
+	// they must be recreated after the inbound itself was hot-reloaded.
+	change.cascadeServiceIds, err = ssmCascadeServiceIds(tx, inbound.Tag)
+	if err != nil {
+		return nil, err
+	}
+	return change, nil
+}
+
+func (s *InboundService) saveInboundDelete(tx *gorm.DB, data json.RawMessage) (*entityCoreChange, error) {
+	var tag string
+	if err := json.Unmarshal(data, &tag); err != nil {
+		return nil, err
+	}
+	refs, err := inboundTagReferences(tx, tag)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) > 0 {
+		return nil, formatTagReferenceError("inbound", tag, refs)
+	}
+	var id uint
+	if err := tx.Model(model.Inbound{}).Select("id").Where("tag = ?", tag).Scan(&id).Error; err != nil {
+		return nil, err
+	}
+	if err := s.ClientService.UpdateClientsOnInboundDelete(tx, id, tag); err != nil {
+		return nil, err
+	}
+	if err := tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error; err != nil {
+		return nil, err
+	}
+	return &entityCoreChange{removeTags: []string{tag}}, nil
 }
 
 func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname string) error {
@@ -388,6 +413,28 @@ func (s *InboundService) fetchUsersByCondition(db *gorm.DB, inboundType string, 
 		usersJson = append(usersJson, json.RawMessage(user))
 	}
 	return usersJson, nil
+}
+
+// RemoveInboundsFromCore removes the given inbound tags from the running core
+// and closes their tracked connections. Missing tags are tolerated so
+// removals stay idempotent; with no running core there is nothing to remove.
+func (s *InboundService) RemoveInboundsFromCore(tags []string) error {
+	coreInstance := s.runtime().Core()
+	if coreInstance == nil || !coreInstance.IsRunning() {
+		return nil
+	}
+	for _, tag := range tags {
+		if err := coreInstance.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
+			return err
+		}
+		// The core may have been stopped concurrently, so guard the instance.
+		if instance := coreInstance.GetInstance(); instance != nil {
+			if tracker := instance.ConnTracker(); tracker != nil {
+				tracker.CloseConnByInbound(tag)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {

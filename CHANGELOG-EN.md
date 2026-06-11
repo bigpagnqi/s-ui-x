@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 This is the English-language changelog. See `CHANGELOG-RU.md` for Russian and
 `CHANGELOG-ZH.md` for Simplified Chinese.
 
+## [1.5.8-beta1] - 2026-06-11 - hot reload for all objects: saves without core restarts; referenced-tag delete guard
+
+Beta: no-restart apply now covers every object the panel manages. Backend-only,
+no manual migration. One behavior change: deleting/renaming a referenced
+outbound, endpoint, or managed inbound is now rejected with an explanatory
+error instead of breaking the next core start.
+
+- Saving inbounds, outbounds, endpoints, and services no longer restarts the
+  sing-box core: the affected object is hot-replaced in the running core (the
+  same mechanism clients and TLS edits already use). Existing connections on
+  unrelated objects survive every save. A failed hot apply still falls back to
+  a full core restart, so the core never serves a stale configuration.
+  - An outbound or endpoint whose tag is captured at adapter construction —
+    another outbound's `detour`, a `selector`/`urltest` member list or
+    `default`, a service dial detour, `dns`/`ntp` detours, a rule-set
+    `download_detour`, or the Clash API UI download detour — is conservatively
+    applied via a full restart. References from route rules and `route.final`
+    are resolved per connection, so those edits stay hot.
+  - Editing a managed-shadowsocks inbound also recreates the `ssm-api` service
+    bound to it, so the service keeps tracking the fresh inbound.
+- Deleting (or renaming) an outbound, endpoint, or managed inbound that is
+  still referenced anywhere — including route rules and `route.final` — is now
+  blocked with an error that lists every referencing site. Previously the save
+  went through and the next core start failed on the dangling reference,
+  taking the whole proxy down.
+- Re-saving the sing-box settings blob without any changes no longer restarts
+  the core (and no longer drops every active connection).
+- Post-save core synchronization, user-initiated restarts, and the cron core
+  starter are now serialized: a save can no longer interleave with a restart
+  and silently leave the running core out of sync with the database.
+- Fixed a latent data race in the panel-restart scheduler (timer callback read
+  an unsynchronized variable); it predates this release.
+
+Full release notes: [`docs/releases/v1.5.8-beta1.md`](docs/releases/v1.5.8-beta1.md).
+
 ## [1.5.7-hotfix1] - 2026-06-11 - Fix "record not found" after deleting a client; SUI_COOKIE_KEY generator
 
 Hotfix for v1.5.7 plus a session cookie key generator in the `s-ui` menu and
